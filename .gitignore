@@ -1,0 +1,14 @@
+# Fichiers JSON
+*.JSON
+
+# Fichiers .env
+*.env
+
+# Fichier Selenium
+selenium/
+
+# Fichier Data
+data/
+
+# Fichier à éviter
+extraction.py
