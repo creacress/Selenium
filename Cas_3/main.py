@@ -13,22 +13,22 @@ from selenium.common.exceptions import (
     ElementNotInteractableException,
     ElementClickInterceptedException,
 )
-# Charge les variables d'env si nécessaire 
+
+# Charge les variables d'env si nécessaire
 load_dotenv()
 
-# Accéder aux variables 
-identifiant = os.getenv('IDENTIFIANT')
-mot_de_passe = os.getenv('MOT_DE_PASSE')
-web_site = os.getenv('WEB_SITE')
-url_redirection = os.getenv('URL_REDIRECTION')
+# Accéder aux variables
+identifiant = os.getenv("IDENTIFIANT")
+mot_de_passe = os.getenv("MOT_DE_PASSE")
+web_site = os.getenv("WEB_SITE")
+url_redirection = os.getenv("URL_REDIRECTION")
+
 
 def configure_selenium():
     print("Configuration de Selenium...")
     service = Service("data/msedgedriver.exe")
     driver = webdriver.Edge(service=service)
-    driver.get(
-        web_site
-    )
+    driver.get(web_site)
     wait = WebDriverWait(driver, 8)
     return driver, wait
 
@@ -53,18 +53,29 @@ def login(driver, wait):
         print("Déjà connecté ou le champ d'identifiant n'est pas présent.")
 
 
-def process_json_files(driver, wait):
-    print("Traitement du fichier JSON pour le cas 4...")
+def process_json_files(file_path):
+    print("Traitement du fichier JSON pour les contrats...")
     numeros_contrat = []
 
-    file_path = "data/cas_3.json"
     if os.path.exists(file_path):
         with open(file_path, "r") as file:
             data = json.load(file)
             for value in data.values():
                 numeros_contrat.append(value)
 
-    return numeros_contrat
+    # Traitement par lots de 200
+    for i in range(0, len(numeros_contrat), 200):
+        lot = numeros_contrat[i:i+200]
+        # Ici, vous pouvez traiter chaque lot
+        print(f"Traitement du lot {i//200+1} contenant {len(lot)} contrats")
+        # Ajoutez votre logique de traitement des contrats ici
+
+    return "Traitement terminé pour tous les lots"
+
+# Utilisation de la fonction
+file_path = "data/cas_3.json"
+result = process_json_files(file_path)
+print(result)
 
 
 def submit_contract_number(driver, wait, numero):
@@ -100,6 +111,22 @@ def submit_contract_number(driver, wait, numero):
 
         # Attendre la visibilité de l'élément avec l'ID 'modalRefContrat'
         wait.until(EC.visibility_of_element_located((By.ID, "modalRefContrat")))
+
+def save_processed_contracts(contrats):
+    """Enregistre les numéros de contrats traités dans un fichier JSON."""
+    file_path = "numeros_contrat_traites_cas_3.json"
+    try:
+        # Lecture du fichier existant et ajout des nouveaux contrats
+        with open(file_path, "r+") as file:
+            existing_data = json.load(file)
+            updated_data = existing_data + [c for c in contrats if c not in existing_data]
+            file.seek(0)
+            json.dump(updated_data, file)
+    except FileNotFoundError:
+        # Création d'un nouveau fichier si celui-ci n'existe pas
+        with open(file_path, "w") as file:
+            json.dump(contrats, file)
+
 
 
 def save_non_modifiable_contract(contrat_number):
@@ -179,10 +206,13 @@ def wait_for_redirection(driver, wait):
             # Localiser le nouveau select
             try:
                 # Localiser le select
-                select_element = driver.find_element(By.CSS_SELECTOR, "#cptLeft > div:nth-child(7) > critere-form > div.form-group.critere_offre > input-itl-ope > input-component > div > select")
+                select_element = driver.find_element(
+                    By.CSS_SELECTOR,
+                    "#cptLeft > div:nth-child(7) > critere-form > div.form-group.critere_offre > input-itl-ope > input-component > div > select",
+                )
                 select_interlocuteur = Select(select_element)
 
-                    # Vérifier si le select a plus d'une option (la première est cachée)
+                # Vérifier si le select a plus d'une option (la première est cachée)
                 if len(select_interlocuteur.options) > 1:
                     # Sélectionner la deuxième option (la première option visible)
                     select_interlocuteur.select_by_index(1)
@@ -245,32 +275,54 @@ def wait_for_redirection(driver, wait):
             except NoSuchElementException:
                 print("Le bouton radio est introuvable.")
 
-
             some_element_selector = "g0_p159|0_r486_c3586_v3"
 
             try:
-                WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, some_element_selector)))
+                WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located((By.ID, some_element_selector))
+                )
             except TimeoutException:
-                print("Le temps d'attente pour la présence de l'élément spécifié est dépassé.")
+                print(
+                    "Le temps d'attente pour la présence de l'élément spécifié est dépassé."
+                )
 
             # Définis les deux sélecteurs CSS
             select_time_selectors = [
                 "#g0_p159\\|0_r486\\[0\\] > div > critere-form:nth-child(7) > div.form-group.critere_psc > input-component > div.no-left-gutter.col-xs-8.col-sm-8.col-md-8 > select",
-                "#g0_p159\\|0_r486\\[0\\] > div > critere-form:nth-child(5) > div.form-group.critere_psc > input-component > div.no-left-gutter.col-xs-8.col-sm-8.col-md-8 > select"
+                "#g0_p159\\|0_r486\\[0\\] > div > critere-form:nth-child(5) > div.form-group.critere_psc > input-component > div.no-left-gutter.col-xs-8.col-sm-8.col-md-8 > select",
             ]
 
             found_selector = False
 
             for select_time_selector in select_time_selectors:
                 try:
-                    WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, select_time_selector)))
-                    WebDriverWait(driver, 10).until(lambda d: len(Select(d.find_element(By.CSS_SELECTOR, select_time_selector)).options) > 0)
-                    select_time_element = Select(driver.find_element(By.CSS_SELECTOR, select_time_selector))
+                    WebDriverWait(driver, 10).until(
+                        EC.presence_of_element_located(
+                            (By.CSS_SELECTOR, select_time_selector)
+                        )
+                    )
+                    WebDriverWait(driver, 10).until(
+                        lambda d: len(
+                            Select(
+                                d.find_element(By.CSS_SELECTOR, select_time_selector)
+                            ).options
+                        )
+                        > 0
+                    )
+                    select_time_element = Select(
+                        driver.find_element(By.CSS_SELECTOR, select_time_selector)
+                    )
                     select_time_element.select_by_value("16H30")
                     found_selector = True
                     break  # Sélecteur trouvé et valeur sélectionnée, sortir de la boucle
-                except (NoSuchElementException, TimeoutException, ElementNotInteractableException) as e:
-                    print(f"Erreur avec le sélecteur : {select_time_selector}, Erreur : {e}")
+                except (
+                    NoSuchElementException,
+                    TimeoutException,
+                    ElementNotInteractableException,
+                ) as e:
+                    print(
+                        f"Erreur avec le sélecteur : {select_time_selector}, Erreur : {e}"
+                    )
 
             if not found_selector:
                 print("Aucun sélecteur valide trouvé pour sélectionner l'heure.")
@@ -319,22 +371,26 @@ def wait_for_redirection(driver, wait):
                     # Trouver et cliquer sur le bouton de soumission
                 try:
                     submit_button = WebDriverWait(driver, 10).until(
-                        EC.element_to_be_clickable((By.CSS_SELECTOR, "form#odcFormCPV button[type='submit']"))
+                        EC.element_to_be_clickable(
+                            (By.CSS_SELECTOR, "form#odcFormCPV button[type='submit']")
+                        )
                     )
                     submit_button.click()
 
-                    WebDriverWait(driver, 10).until(
-                        EC.url_changes(url_redirection)
-                    )
+                    WebDriverWait(driver, 10).until(EC.url_changes(url_redirection))
                     print("Formulaire soumis avec succès.")
                     print("Modification réussie.")
-                
+
                 except ElementClickInterceptedException:
-                    print("Un autre élément bloque le clic sur le bouton de soumission.")
+                    print(
+                        "Un autre élément bloque le clic sur le bouton de soumission."
+                    )
                     driver.save_screenshot("debug_screenshot_erreur_clic.png")
                 except NoSuchElementException:
                     print("Le bouton de soumission est introuvable.")
-                    driver.save_screenshot("debug_screenshot_erreur_bouton_introuvable.png")
+                    driver.save_screenshot(
+                        "debug_screenshot_erreur_bouton_introuvable.png"
+                    )
 
         else:
             valeur_a_copier = driver.find_element(
@@ -391,7 +447,7 @@ def wait_for_redirection(driver, wait):
                 select_time_element.select_by_value("16H30")
             except NoSuchElementException:
                 print("L'option '16H30' n'est pas disponible.")
-                
+
             # Trouver et cliquer sur le bouton de soumission
             try:
                 submit_button = WebDriverWait(driver, 10).until(
@@ -415,8 +471,8 @@ def wait_for_redirection(driver, wait):
             except NoSuchElementException:
                 print("Le bouton de soumission est introuvable.")
                 driver.save_screenshot("debug_screenshot_erreur_bouton_introuvable.png")
-                
-    # Exception levé pour la redirection            
+
+    # Exception levé pour la redirection
     except TimeoutException as e:
         print(f"Erreur : La redirection a échoué ou a pris trop de temps. {e}")
         driver.save_screenshot("debug_screenshot_erreur_redirection.png")
@@ -466,6 +522,7 @@ def main():
     driver.save_screenshot("debug_screenshot_avant_fermeture.png")
     driver.quit()
     print("Fermeture du navigateur.")
+
 
 if __name__ == "__main__":
     main()
