@@ -1,5 +1,7 @@
 import os
 import json
+import time
+import threading
 from dotenv import load_dotenv
 from selenium import webdriver
 from selenium.webdriver.edge.service import Service
@@ -12,25 +14,81 @@ from selenium.common.exceptions import (
     NoSuchElementException,
     ElementNotInteractableException,
     ElementClickInterceptedException,
+    WebDriverException,
 )
+from affranchigo_forfait_case import AffranchigoForfaitCase
 
+from affranchigo_lib_case import AffranchigoFLibCase
+
+from debug import log_error_and_capture_screenshot, setup_logger
+
+
+# Initatilisation du debug
+logger = setup_logger
 # Charge les variables d'env si nécessaire
 load_dotenv()
 
 # Accéder aux variables
 identifiant = os.getenv("IDENTIFIANT")
 mot_de_passe = os.getenv("MOT_DE_PASSE")
-web_site = os.getenv("WEB_SITE")
-url_redirection = os.getenv("URL_REDIRECTION")
 
 
 def configure_selenium():
     print("Configuration de Selenium...")
     service = Service("data/msedgedriver.exe")
     driver = webdriver.Edge(service=service)
-    driver.get(web_site)
-    wait = WebDriverWait(driver, 8)
+    driver.get(
+        "https://www.deviscontrat.net-courrier.extra.laposte.fr/appli/ihm/index/acces-dc?profil=ADV"
+    )
+    wait = WebDriverWait(driver, 3)
     return driver, wait
+
+
+def check_and_handle_modal(driver):
+    while True:
+        try:
+            # Essaie de gérer la première modale avec le bouton nommé "OK"
+            modal_button_ok = driver.find_element(
+                By.NAME,
+                  "OK"
+                )
+            if modal_button_ok.is_displayed():
+                modal_button_ok.click()
+                print("Première modale gérée.")
+
+             # Vérifier et gérer la Deuxième Modale   
+            modal_button_css = driver.find_element(
+                By.CSS_SELECTOR,
+                "body > div.bootbox.modal.fade.bootbox-alert.in > div > div > div.modal-footer > button"
+                )
+            if modal_button_css.is_displayed():
+                modal_button_css.click()
+                print("Deuxième Modale gérée")
+            
+            # Vérifier et gérer la Modale Permission
+            modal_button_1 = driver.find_element(
+                By.CSS_SELECTOR,
+                "body > div.swal2-container.swal2-center.swal2-fade.swal2-shown > div > div.swal2-buttonswrapper > button.swal2-confirm.swal2-styled",
+            )
+            if modal_button_1.is_displayed():
+                modal_button_1.click()
+                driver.refresh()
+                print("Modale permission gérée.")
+
+            # Vérifier et gérer la Modale API erreur
+            modal_button_2 = driver.find_element(
+                By.CSS_SELECTOR,
+                "body > div.swal2-container.swal2-center.swal2-backdrop-show > div > div.swal2-actions > button.swal2-confirm.swal2-styled",
+            )
+            if modal_button_2.is_displayed():
+                modal_button_2.click()
+                driver.refresh()
+                print("Modale API erreur gérée.")
+        except NoSuchElementException:
+            # Les modales ne sont pas présentes
+            pass
+
+        time.sleep(1)  # Vérifie toutes les secondes
 
 
 def login(driver, wait):
@@ -42,6 +100,7 @@ def login(driver, wait):
         )
         input_identifiant.clear()
         input_identifiant.send_keys(identifiant)
+        input_identifiant.send_keys(Keys.RETURN)
 
         input_mot_de_passe = wait.until(
             EC.presence_of_element_located((By.ID, "AUTHENTICATION.PASSWORD"))
@@ -51,6 +110,8 @@ def login(driver, wait):
         input_mot_de_passe.send_keys(Keys.RETURN)
     except TimeoutException:
         print("Déjà connecté ou le champ d'identifiant n'est pas présent.")
+    except Exception as e:
+        log_error_and_capture_screenshot(driver, "Problème Login", e)
 
 
 def process_json_files(file_path):
@@ -60,22 +121,9 @@ def process_json_files(file_path):
     if os.path.exists(file_path):
         with open(file_path, "r") as file:
             data = json.load(file)
-            for value in data.values():
-                numeros_contrat.append(value)
+            numeros_contrat = list(data.values())
 
-    # Traitement par lots de 200
-    for i in range(0, len(numeros_contrat), 200):
-        lot = numeros_contrat[i:i+200]
-        # Ici, vous pouvez traiter chaque lot
-        print(f"Traitement du lot {i//200+1} contenant {len(lot)} contrats")
-        # Ajoutez votre logique de traitement des contrats ici
-
-    return "Traitement terminé pour tous les lots"
-
-# Utilisation de la fonction
-file_path = "data/cas_3.json"
-result = process_json_files(file_path)
-print(result)
+    return numeros_contrat
 
 
 def submit_contract_number(driver, wait, numero):
@@ -91,26 +139,10 @@ def submit_contract_number(driver, wait, numero):
     submit_button.click()
 
     try:
-        # Essaie de gérer la première modale avec le bouton nommé "OK"
-        modal_button_ok = wait.until(EC.element_to_be_clickable((By.NAME, "OK")))
-        modal_button_ok.click()
-        print("Première modale gérée.")
-    except TimeoutException:
-        print("Pas de première modale à gérer.")
-
-    try:
-        # Essaie de gérer la deuxième modale avec le sélecteur CSS spécifique
-        modal_button_selector = "body > div.bootbox.modal.fade.bootbox-alert.in > div > div > div.modal-footer > button"
-        modal_button_css = wait.until(
-            EC.element_to_be_clickable((By.CSS_SELECTOR, modal_button_selector))
-        )
-        modal_button_css.click()
-        print("Deuxième modale gérée.")
-    except TimeoutException:
-        print("Pas de deuxième modale à gérer.")
-
         # Attendre la visibilité de l'élément avec l'ID 'modalRefContrat'
         wait.until(EC.visibility_of_element_located((By.ID, "modalRefContrat")))
+    except:
+        print('Modale Ref Contrat problème')
 
 def save_processed_contracts(contrats):
     """Enregistre les numéros de contrats traités dans un fichier JSON."""
@@ -119,14 +151,15 @@ def save_processed_contracts(contrats):
         # Lecture du fichier existant et ajout des nouveaux contrats
         with open(file_path, "r+") as file:
             existing_data = json.load(file)
-            updated_data = existing_data + [c for c in contrats if c not in existing_data]
+            updated_data = existing_data + [
+                c for c in contrats if c not in existing_data
+            ]
             file.seek(0)
             json.dump(updated_data, file)
     except FileNotFoundError:
         # Création d'un nouveau fichier si celui-ci n'existe pas
         with open(file_path, "w") as file:
             json.dump(contrats, file)
-
 
 
 def save_non_modifiable_contract(contrat_number):
@@ -162,12 +195,15 @@ def switch_to_iframe_and_click_modification(driver, wait, contrat_number):
             EC.element_to_be_clickable((By.XPATH, modification_button_selector))
         )
         bouton_modification.click()
+
     except TimeoutException as e:
         # Enregistrement du numéro de contrat dans un fichier JSON si le bouton n'est pas trouvé
         print(
             f"Le bouton 'Modification' pour le contrat {contrat_number} n'est pas trouvé. Enregistrement dans le fichier non_modifiable.json"
         )
         save_non_modifiable_contract(contrat_number)
+        url_de_depart = "https://www.deviscontrat.net-courrier.extra.laposte.fr/appli/ihm/index/acces-dc"
+        driver.get(url_de_depart)
         raise  # Vous pouvez choisir de lever ou non une exception ici
 
     finally:
@@ -191,268 +227,199 @@ def wait_for_redirection(driver, wait):
         print("Redirection réussie.")
     except TimeoutException as e:
         print(f"Erreur lors de l'interaction avec les éléments : {e}")
-        driver.save_screenshot("debug_screenshot_erreur_redirection.png")
+        log_error_and_capture_screenshot(driver, "Erreur_Redirection_temps", e)
         raise
     except Exception as e:
         print(f"Erreur inattendue lors de la redirection : {e}")
         driver.save_screenshot("debug_screenshot_erreur_inattendue.png")
+        log_error_and_capture_screenshot(driver, "Erreur_Redirection_autre", e)
+
+
+def modification_condition_ventes(driver, wait):
+    # Permet de vérifier quel cas ont va gérer
+    # Cas Forfait
+    forfait_select_1_selector = "#g0_p159\\|0_r486\\[0\\] > div > critere-form:nth-child(3) > div.form-group.critere_psc > input-etb-prest > div > select"
+    forfait_select_2_selector = "#\\[g0_p159\\|0_r486\\[0\\]\\] > div > critere-form:nth-child(3) > div.form-group.critere_psc > input-etb-prest > div > select"
+    # Cas Liberté
+    liberte_select_1_selector = "#g0_p265\\|0_r2055\\[0\\] > div > critere-form:nth-child(3) > div.form-group.critere_psc > input-etb-prest > div > select"
+    liberte_select_2_selector = "#\\[g0_p265\\|0_r2055\\[0\\]\\] > div > critere-form:nth-child(3) > div.form-group.critere_psc > input-etb-prest > div > select"
+    # Création d'une instance de la classe AffranchigoForfaitCase
+    affranchigo_forfait_case = AffranchigoForfaitCase(driver)
+    # Création de l'instance de la classe AffranchigoFLibCase
+    affranchigo_liberte_case = AffranchigoFLibCase(driver)
 
     try:
-        # Obtenir le texte de l'en-tête h1 pour déterminer le type de contrat
         h1_text = driver.find_element(By.TAG_NAME, "h1").text
-
-        # Vérifier le type de contrat et exécuter des actions en conséquence
+        print(f"Texte de l'en-tête H1: {h1_text}")
         if "Affranchigo forfait" in h1_text:
-            # Localiser le nouveau select
             try:
-                # Localiser le select
                 select_element = driver.find_element(
                     By.CSS_SELECTOR,
                     "#cptLeft > div:nth-child(7) > critere-form > div.form-group.critere_offre > input-itl-ope > input-component > div > select",
                 )
                 select_interlocuteur = Select(select_element)
-
-                # Vérifier si le select a plus d'une option (la première est cachée)
                 if len(select_interlocuteur.options) > 1:
-                    # Sélectionner la deuxième option (la première option visible)
                     select_interlocuteur.select_by_index(1)
+                    print("Sélecteur interlocuteur opérationnel sélectionné.")
                 else:
-                    print("Le sélecteur ne contient pas d'options sélectionnables.")
-            except NoSuchElementException:
-                print("L'élément select n'a pas été trouvé.")
-            except Exception as e:
-                print(f"Erreur inattendue : {e}")
-
-            # Copier et coller les valeurs code Regate
-            try:
-                valeur_a_copier = driver.find_element(
-                    By.CSS_SELECTOR, "[id='g0_p159|0_r486_c487[0]']"
-                ).get_attribute("value")
-                champ_cible = driver.find_element(
-                    By.CSS_SELECTOR, "[id='g0_p159|0_r486_c487']"
-                )
-                champ_cible.clear()
-                champ_cible.send_keys(valeur_a_copier)
-                champ_cible.send_keys(Keys.TAB)
-                # ... Autres opérations liées à cet élément
-            except NoSuchElementException:
-                print(
-                    "La première partie du contrat est déjà traitée. Continuation avec les étapes suivantes."
-                )
-
-            # Attendre la mise à jour du Select et vérifier la présence d'options
-            select_selector = "#g0_p159\\|0_r486\\[0\\] > div > critere-form:nth-child(3) > div.form-group.critere_psc > input-etb-prest > div > select"
-            WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, select_selector))
-            )
-            try:
-                select_element = Select(
-                    driver.find_element(By.CSS_SELECTOR, select_selector)
-                )
-                WebDriverWait(driver, 10).until(
-                    lambda driver: len(select_element.options) > 1
-                )
-                try:
-                    select_element.select_by_index(1)
-                except NoSuchElementException:
-                    print("L'option sélectionnée n'est pas disponible dans le select.")
-                except ElementNotInteractableException:
                     print(
-                        "Impossible d'interagir avec le select pour sélectionner une option."
+                        "Le sélecteur interlocuteur opérationnel ne contient pas d'options sélectionnables."
                     )
-            except TimeoutException:
-                print("Temps d'attente dépassé pour la présence du select.")
-
-            # Appuis sur Oui pour la fusion des rôles
-            radio_button_selector = "#g0_p159\\|0_c25258_v1"
-            try:
-                radio_button = driver.find_element(
-                    By.CSS_SELECTOR, radio_button_selector
-                )
-                radio_button.click()
-            except ElementClickInterceptedException:
-                print("Un autre élément bloque le clic sur le bouton radio.")
             except NoSuchElementException:
-                print("Le bouton radio est introuvable.")
-
-            some_element_selector = "g0_p159|0_r486_c3586_v3"
+                print("L'élément select interlocuteur opérationnel n'a pas été trouvé.")
+            except Exception as e:
+                print(
+                    f"Erreur inattendue avec le sélecteur interlocuteur opérationnel : {e}"
+                )
+                log_error_and_capture_screenshot(
+                    driver, "Selecteur_interlocuteur_non_trouvé", e
+                )
 
             try:
-                WebDriverWait(driver, 10).until(
-                    EC.presence_of_element_located((By.ID, some_element_selector))
-                )
-            except TimeoutException:
-                print(
-                    "Le temps d'attente pour la présence de l'élément spécifié est dépassé."
-                )
+                # Initialise les variables pour vérifier la présence des sélecteurs
+                forfait_select_1_found = False
+                forfait_select_2_found = False
+                forfait_select_1_options = 0
+                forfait_select_2_options = 0
 
-            # Définis les deux sélecteurs CSS
-            select_time_selectors = [
-                "#g0_p159\\|0_r486\\[0\\] > div > critere-form:nth-child(7) > div.form-group.critere_psc > input-component > div.no-left-gutter.col-xs-8.col-sm-8.col-md-8 > select",
-                "#g0_p159\\|0_r486\\[0\\] > div > critere-form:nth-child(5) > div.form-group.critere_psc > input-component > div.no-left-gutter.col-xs-8.col-sm-8.col-md-8 > select",
-            ]
-
-            found_selector = False
-
-            for select_time_selector in select_time_selectors:
+                # Vérifier le selecteur 1
                 try:
                     WebDriverWait(driver, 10).until(
                         EC.presence_of_element_located(
-                            (By.CSS_SELECTOR, select_time_selector)
+                            (By.CSS_SELECTOR, forfait_select_1_selector)
                         )
                     )
-                    WebDriverWait(driver, 10).until(
-                        lambda d: len(
-                            Select(
-                                d.find_element(By.CSS_SELECTOR, select_time_selector)
-                            ).options
-                        )
-                        > 0
+                    select_1 = Select(
+                        driver.find_element(By.CSS_SELECTOR, forfait_select_1_selector)
                     )
-                    select_time_element = Select(
-                        driver.find_element(By.CSS_SELECTOR, select_time_selector)
-                    )
-                    select_time_element.select_by_value("16H30")
-                    found_selector = True
-                    break  # Sélecteur trouvé et valeur sélectionnée, sortir de la boucle
-                except (
-                    NoSuchElementException,
-                    TimeoutException,
-                    ElementNotInteractableException,
-                ) as e:
-                    print(
-                        f"Erreur avec le sélecteur : {select_time_selector}, Erreur : {e}"
-                    )
+                    forfait_select_1_options = len(select_1.options)
+                    forfait_select_1_found = True
+                except (NoSuchElementException, TimeoutException):
+                    print("Selecteur 1 non trouvé ou non visible")
 
-            if not found_selector:
-                print("Aucun sélecteur valide trouvé pour sélectionner l'heure.")
+                # Vérifier le selecteur 2
+                try:
+                    WebDriverWait(driver, 10).until(
+                        EC.presence_of_element_located(
+                            (By.CSS_SELECTOR, forfait_select_2_selector)
+                        )
+                    )
+                    select_2 = Select(
+                        driver.find_element(By.CSS_SELECTOR, forfait_select_2_selector)
+                    )
+                    forfait_select_2_options = len(select_2.options)
+                    forfait_select_2_found = True
+                except (NoSuchElementException, TimeoutException):
+                    print("Selecteur 2 non trouvé ou non visible")
+
+                    # Logique pour décider quel cas utiliser
+                if (
+                    forfait_select_1_found
+                    and forfait_select_1_options > 1
+                    and not forfait_select_2_found
+                ):
+                    print(
+                        "Utilisation du cas 3 (select_1 est présent avec options et select_2 est absent)"
+                    )
+                    affranchigo_forfait_case.handle_case_3(driver)
+
+                elif (
+                    forfait_select_2_found
+                    and forfait_select_2_options > 1
+                    and not forfait_select_1_found
+                ):
+                    print(
+                        "Utilisation du cas 3 (select_2 est présent avec options et select_1 est absent)"
+                    )
+                    affranchigo_forfait_case.handle_case_3(driver)
+
+                elif (
+                    forfait_select_1_found
+                    and forfait_select_2_found
+                    and (forfait_select_1_options <= 1 or forfait_select_2_options <= 1)
+                ):
+                    print(
+                        "Utilisation du cas 2 (les deux sélecteurs sont présents mais au moins l'un est vide)"
+                    )
+                    affranchigo_forfait_case.handle_case_2(driver)
+
+                elif (
+                    forfait_select_1_found
+                    and forfait_select_2_found
+                    and (forfait_select_1_options > 1 and forfait_select_2_options > 1)
+                ):
+                    print(
+                        "Utilisation du cas 2 (les deux sélecteurs sont présents et avec options)"
+                    )
+                    affranchigo_forfait_case.handle_case_2(driver)
+
+                elif not forfait_select_1_found and not forfait_select_2_found:
+                    print("Aucun des sélecteurs n'est présent")
+                # Gérer le cas où aucun sélecteur n'est trouvé
+                else:
+                    print("Aucun cas applicable ou logique de décision à revoir.")
+            except Exception as e:
+                print(f"Erreur inattendue : {e}")
+                log_error_and_capture_screenshot(
+                    driver,
+                    "Aucun cas Forfait applicable ou logique de décision à revoir",
+                    e,
+                )
 
             # Clique sur "Conditions Particulières de Réalisations"
             try:
+                bouton_haut = driver.find_element(
+                    By.CSS_SELECTOR,
+                    "body > app-root > offre-form > app-odc-header > aside > div.user_infos > a",
+                )
+                driver.execute_script("arguments[0].scrollIntoView();", bouton_haut)
                 element = WebDriverWait(driver, 10).until(
                     EC.element_to_be_clickable(
                         (By.CSS_SELECTOR, "#content_offre > ul > li:nth-child(3) > a")
                     )
                 )
                 element.click()
-            except TimeoutException as e:
-                print(
-                    f"Erreur : L'onglet 'Conditions Particulières de Réalisations' n'est pas devenu cliquable dans le temps imparti. {e}"
+                print("Le clique à bien été effectué")
+            except (TimeoutException, NoSuchElementException, Exception) as e:
+                log_error_and_capture_screenshot(
+                    driver,
+                    "Onglet Conditions Particulières de ventes non trouvé ou cliquable",
+                    e,
                 )
-            except NoSuchElementException as e:
-                print(
-                    f"Erreur : L'onglet 'Conditions Particulières de Réalisations' est introuvable. {e}"
-                )
-            except Exception as e:
-                print(f"Erreur inattendue lors du clic sur l'onglet : {e}")
 
-                try:
-                    select_heures_depot = Select(
-                        driver.find_element(
+            try:
+                # Trouve l'élément et crée une instance de Select
+                element = WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located(
+                        (
                             By.CSS_SELECTOR,
                             "#p159CPR > critere-form > div.form-group.critere_psc > input-component > div > select",
                         )
                     )
-                    if len(select_heures_depot.options) <= 1:
-                        select_heures_depot.select_by_index(1)
-                except NoSuchElementException as e:
+                )
+                select_heures_depot = Select(element)
+
+                # Vérifie la valeur sélectionnée actuelle
+                current_value = select_heures_depot.first_selected_option.get_attribute(
+                    "value"
+                )
+                if current_value in ["", "null"]:
+                    select_heures_depot.select_by_index(3)
+                    print("Une nouvelle heure a été sélectionnée.")
+                else:
                     print(
-                        f"Erreur : Le select pour les heures de dépôt est introuvable. {e}"
+                        "Une heure est déjà sélectionnée, aucune action supplémentaire n'est requise."
                     )
-                except ElementNotInteractableException as e:
-                    print(
-                        f"Erreur : Impossible d'interagir avec le select pour les heures de dépôt. {e}"
-                    )
-                except Exception as e:
-                    print(
-                        f"Erreur inattendue lors de la manipulation du select pour les heures de dépôt : {e}"
-                    )
-
-                    # Trouver et cliquer sur le bouton de soumission
-                try:
-                    submit_button = WebDriverWait(driver, 10).until(
-                        EC.element_to_be_clickable(
-                            (By.CSS_SELECTOR, "form#odcFormCPV button[type='submit']")
-                        )
-                    )
-                    submit_button.click()
-
-                    WebDriverWait(driver, 10).until(EC.url_changes(url_redirection))
-                    print("Formulaire soumis avec succès.")
-                    print("Modification réussie.")
-
-                except ElementClickInterceptedException:
-                    print(
-                        "Un autre élément bloque le clic sur le bouton de soumission."
-                    )
-                    driver.save_screenshot("debug_screenshot_erreur_clic.png")
-                except NoSuchElementException:
-                    print("Le bouton de soumission est introuvable.")
-                    driver.save_screenshot(
-                        "debug_screenshot_erreur_bouton_introuvable.png"
-                    )
-
-        else:
-            valeur_a_copier = driver.find_element(
-                By.ID, "g0_p265|0_r2055_c2056[0]"
-            ).get_attribute("value")
-            champ_cible = driver.find_element(By.ID, "g0_p265|0_r2055_c2056")
-            champ_cible.clear()
-            champ_cible.send_keys(valeur_a_copier)
-            champ_cible.send_keys(Keys.TAB)
-
-            # Attendre la mise à jour du Select et vérifier la présence d'options
-            select_selector = "#g0_p265\\|0_r2055\\[0\\] > div > critere-form:nth-child(3) > div.form-group.critere_psc > input-etb-prest > div > select"
-            WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, select_selector))
-            )
-            select_element = Select(
-                driver.find_element(By.CSS_SELECTOR, select_selector)
-            )
-
-            # Attendre que les options soient chargées dans le Select
-            WebDriverWait(driver, 10).until(
-                lambda driver: len(select_element.options) > 1
-            )
-
-            # Sélectionner la deuxième option du Select
-            select_element.select_by_index(1)
-
-            # Appuis sur Oui pour la fusion des rôles
-            radio_button_selector = "#g0_p265\\|0_c24954_v1"
-            radio_button = driver.find_element(By.CSS_SELECTOR, radio_button_selector)
-            radio_button.click()
-
-            # Remplacez 'some_element_selector' par le sélecteur de l'élément que vous attendez
-            some_element_selector = "g0_p265|0_r2055_c3642_v3"
-            WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.ID, some_element_selector))
-            )
-            # Sélectionner une heure de dépôt
-            select_time_selector = "#g0_p265\\|0_r2055\\[0\\] > div > critere-form:nth-child(7) > div.form-group.critere_psc > input-component > div > select"
-            WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, select_time_selector))
-            )
-
-            # Créer un objet Select pour interagir avec le Select
-            select_time_element = Select(
-                driver.find_element(By.CSS_SELECTOR, select_time_selector)
-            )
-
-            # Attendre que les options soient chargées dans le Select
-            WebDriverWait(driver, 10).until(
-                lambda d: len(select_time_element.options) > 0
-            )
-            try:
-                select_time_element.select_by_value("16H30")
-            except NoSuchElementException:
-                print("L'option '16H30' n'est pas disponible.")
+            except Exception as e:
+                print(
+                    f"Erreur lors de la manipulation du select pour les heures de dépôt : {e}"
+                )
 
             # Trouver et cliquer sur le bouton de soumission
             try:
                 submit_button = WebDriverWait(driver, 10).until(
-                    EC.element_to_be_clickable(
-                        (By.CSS_SELECTOR, "form#odcFormCPV button[type='submit']")
+                    EC.visibility_of_element_located(
+                        (By.CSS_SELECTOR, "#odcFormCPR > button")
                     )
                 )
                 submit_button.click()
@@ -463,25 +430,155 @@ def wait_for_redirection(driver, wait):
                     )
                 )
                 print("Formulaire soumis avec succès.")
-                print("Modification réussie.")
+                time.sleep(1)
+                try:
+                    # Retour à l'URL de départ
+                    url_de_depart = "https://www.deviscontrat.net-courrier.extra.laposte.fr/appli/ihm/index/acces-dc"
+                    driver.get(url_de_depart)
+                    print("Retour à l'URL de départ réussi.")
+                except Exception as e:
+                    print(f"Erreur lors de la navigation vers l'URL de départ : {e}")
+                    driver.save_screenshot("debug_screenshot_erreur_retour.png")
 
-            except ElementClickInterceptedException:
-                print("Un autre élément bloque le clic sur le bouton de soumission.")
+            except TimeoutException:
+                print("Le bouton de soumission n'as pas été trouvé dans les temps")
                 driver.save_screenshot("debug_screenshot_erreur_clic.png")
-            except NoSuchElementException:
-                print("Le bouton de soumission est introuvable.")
-                driver.save_screenshot("debug_screenshot_erreur_bouton_introuvable.png")
+            except Exception as e:
+                print(f"Erreur lors de la soumission formulaire : {e}")
+                driver.save_screenshot("debug_screenshot_erreur_soumission.png")
 
-    # Exception levé pour la redirection
-    except TimeoutException as e:
-        print(f"Erreur : La redirection a échoué ou a pris trop de temps. {e}")
-        driver.save_screenshot("debug_screenshot_erreur_redirection.png")
+        else:
+            print("Affranchigo Liberté")
+            try:
+                # Initialise les variables pour vérifier la présence des sélecteurs
+                liberte_select_1_found = False
+                liberte_select_2_found = False
+                liberte_select_1_options = 0
+                liberte_select_2_options = 0
+
+                # Vérifier le selecteur 1
+                try:
+                    WebDriverWait(driver, 10).until(
+                        EC.presence_of_element_located(
+                            (By.CSS_SELECTOR, liberte_select_1_selector)
+                        )
+                    )
+                    select_1 = Select(
+                        driver.find_element(By.CSS_SELECTOR, liberte_select_1_selector)
+                    )
+                    liberte_select_1_options = len(select_1.options)
+                    liberte_select_1_found = True
+                except (NoSuchElementException, TimeoutException):
+                    print("Selecteur 1 non trouvé ou non visible")
+
+                # Vérifier le selecteur 2
+                try:
+                    WebDriverWait(driver, 10).until(
+                        EC.presence_of_element_located(
+                            (By.CSS_SELECTOR, liberte_select_2_selector)
+                        )
+                    )
+                    select_2 = Select(
+                        driver.find_element(By.CSS_SELECTOR, liberte_select_2_selector)
+                    )
+                    liberte_select_2_options = len(select_2.options)
+                    liberte_select_2_found = True
+                except (NoSuchElementException, TimeoutException):
+                    print("Selecteur 2 non trouvé ou non visible")
+
+                    # Logique pour décider quel cas utiliser
+                if (
+                    liberte_select_1_found
+                    and liberte_select_1_options > 1
+                    and not liberte_select_2_found
+                ):
+                    print(
+                        "Utilisation du cas 1 (select_1 est présent avec options et select_2 est absent)"
+                    )
+                    affranchigo_liberte_case.handle_liberte_case_1(driver)
+
+                elif (
+                    liberte_select_2_found
+                    and liberte_select_2_options > 1
+                    and not liberte_select_1_found
+                ):
+                    print(
+                        "Utilisation du cas 1 (select_2 est présent avec options et select_1 est absent)"
+                    )
+                    affranchigo_liberte_case.handle_liberte_case_1(driver)
+
+                elif (
+                    liberte_select_1_found
+                    and liberte_select_2_found
+                    and (liberte_select_1_options <= 1 or liberte_select_2_options <= 1)
+                ):
+                    print(
+                        "Utilisation du cas 3 (les deux sélecteurs sont présents mais au moins l'un est vide)"
+                    )
+                    affranchigo_liberte_case.handle_liberte_case_3(driver)
+
+                elif (
+                    liberte_select_1_found
+                    and liberte_select_2_found
+                    and (liberte_select_1_options > 1 and liberte_select_2_options > 1)
+                ):
+                    print(
+                        "Utilisation du cas 3 (les deux sélecteurs sont présents et avec options)"
+                    )
+                    affranchigo_liberte_case.handle_liberte_case_3(driver)
+
+                elif not liberte_select_1_found and not liberte_select_2_found:
+                    print("Aucun des sélecteurs n'est présent")
+                # Gérer le cas où aucun sélecteur n'est trouvé
+                else:
+                    print("Aucun cas applicable ou logique de décision à revoir.")
+            except Exception as e:
+                print(f"Erreur inattendue : {e}")
+                log_error_and_capture_screenshot(
+                    driver,
+                    "Aucun cas Liberté applicable ou logique de décision à revoir ",
+                    e,
+                )
+
+            # Trouver et cliquer sur le bouton de soumission
+            try:
+                submit_button = WebDriverWait(driver, 10).until(
+                    EC.visibility_of_element_located(
+                        (By.CSS_SELECTOR, "#odcFormCPV > button")
+                    )
+                )
+                submit_button.click()
+
+                WebDriverWait(driver, 10).until(
+                    EC.url_changes(
+                        "https://www.deviscontrat.net-courrier.extra.laposte.fr/appli/ihm/configurateur/put-contract"
+                    )
+                )
+                print("Formulaire soumis avec succès.")
+                time.sleep(1)
+                try:
+                    # Retour à l'URL de départ
+                    url_de_depart = "https://www.deviscontrat.net-courrier.extra.laposte.fr/appli/ihm/index/acces-dc"
+                    driver.get(url_de_depart)
+                    print("Retour à l'URL de départ réussi.")
+                except Exception as e:
+                    print(f"Erreur lors de la navigation vers l'URL de départ : {e}")
+                    driver.save_screenshot("debug_screenshot_erreur_retour.png")
+
+            except TimeoutException:
+                print("Le bouton de soumission n'as pas été trouvé dans les temps")
+                driver.save_screenshot("debug_screenshot_erreur_clic.png")
+            except Exception as e:
+                print(f"Erreur lors de la soumission formulaire : {e}")
+                driver.save_screenshot("debug_screenshot_erreur_soumission.png")
+
     except NoSuchElementException as e:
         print(f"Erreur : Élément non trouvé. {e}")
         driver.save_screenshot("debug_screenshot_erreur_element.png")
     except Exception as e:
         print(f"Erreur inattendue : {e}")
         driver.save_screenshot("debug_screenshot_erreur_inattendue.png")
+        log_error_and_capture_screenshot(driver, "Erreur innatendue", e)
 
 
 def process_contract(driver, wait, numero_contrat):
@@ -497,14 +594,16 @@ def process_contract(driver, wait, numero_contrat):
         # Attendre la redirection et effectuer des actions supplémentaires
         wait_for_redirection(driver, wait)
 
+        # Modifications "Conditions Particulières de Ventes"
+        modification_condition_ventes(driver, wait)
+
         print(f"Traitement du contrat numéro {numero_contrat} terminé.")
+        # Enregistrement du temps par contrat
     except Exception as e:
         print(f"Erreur lors du traitement du contrat {numero_contrat}: {e}")
-        # Gérer l'exception ou effectuer une récupération ici
-
-    # Retour à l'URL de départ
-    url_de_depart = "https://www.deviscontrat.net-courrier.extra.laposte.fr/appli/ihm/index/acces-dc"
-    driver.get(url_de_depart)
+        log_error_and_capture_screenshot(
+            driver, f"Erreur lors du traitement du contrat {numero_contrat}", e
+        )
 
 
 def main():
@@ -512,12 +611,30 @@ def main():
     driver, wait = configure_selenium()
     login(driver, wait)
 
-    numeros_contrat = process_json_files(driver, wait)
+    file_path = "data/cas_3.json"
+    numeros_contrat = process_json_files(file_path)
+
+    # Création et démarrage du thread
+    modal_thread = threading.Thread(target=check_and_handle_modal, args=(driver,))
+    modal_thread.daemon = True
+    modal_thread.start()
+
+    # Initialiser un compteur pour suivre le nombre de contrats traités
+    compteur = 0
+
     for numero_contrat in numeros_contrat:
+        if compteur >= 200:
+            print("Limite de 200 contrats atteinte.")
+            break  # Arrêter la boucle si 200 contrats ont été traités
+
         if numero_contrat:
+            print(f"Traitement du contrat numéro {numero_contrat}...")
             process_contract(driver, wait, numero_contrat)
-        else:
-            print("Aucun numéro de contrat trouvé.")
+            compteur += 1
+            print(f"Nombre de contrats traités : {compteur}")
+
+            # Enregistrement du contrat traité
+            save_processed_contracts([numero_contrat])
 
     driver.save_screenshot("debug_screenshot_avant_fermeture.png")
     driver.quit()
