@@ -9,6 +9,7 @@ Ce script Selenium, développé en Python, automatise diverses tâches sur un si
 - **Connexion Automatique**: Utilise des identifiants stockés dans des variables d'environnement pour se connecter automatiquement.
 - **Traitement de Fichiers JSON**: Lit et traite les informations stockées dans des fichiers JSON.
 - **Interactions avec le Navigateur**: Inclut la saisie de texte, le clic sur des boutons, et le changement entre des iframes.
+- **Mise en place d'un Threads**  Permet de gérer les Modales pop et autres intrus du process
 - **Gestion des Exceptions**: Gère les exceptions courantes telles que les éléments non trouvés ou non interactifs.
 - **Captures d'Écran de Débogage**: Prend des captures d'écran en cas d'erreurs pour faciliter le débogage.
 
